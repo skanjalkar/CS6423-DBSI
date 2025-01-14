@@ -18,52 +18,205 @@
 
 #define UNUSED(p) ((void)(p))
 
-/*
-FROM WIKI...
-
-For example, for sorting 900 megabytes of data using only 100 megabytes of RAM:
-
-    1. Read 100 MB of the data in main memory and sort by some conventional method, like quicksort.
-
-    2. Write the sorted data to disk.
-
-    3. Repeat steps 1 and 2 until all of the data is in sorted 100 MB chunks
-    (there are 900MB / 100MB = 9 chunks), which now need to be merged into one single output file.
-
-    4. Read the first 10 MB (= 100MB / (9 chunks + 1)) of each sorted chunk into input buffers in main memory
-    and allocate the remaining 10 MB for an output buffer. (In practice, it might provide better
-    performance to make the output buffer larger and the input buffers slightly smaller.)
-
-    5. Perform a 9-way merge and store the result in the output buffer. Whenever the output buffer fills,
-    write it to the final sorted file and empty it. Whenever any of the 9 input buffers empties,
-    fill it with the next 10 MB of its associated 100 MB sorted chunk until no more data from the chunk is available.
-*/
-
 namespace buzzdb {
 
-struct ChunkData {
-    uint64_t value;
-    size_t chunk_index;
-    size_t index;
+/**
+ * A small struct to help manage reading from each chunk (run).
+ * see https://stackoverflow.com/questions/20802396/how-external-merge-sort-algorithm-works
+ * We maintain:
+ *  - The file pointer to the chunk.
+ *  - The total number of 64-bit values in that chunk.
+ *  - Current offset (# of values) read so far from the chunk.
+ *  - An in-memory buffer for partial reads of the chunk.
+ *  - The current index (position) within that buffer.
+ */
+struct ChunkReader {
+    std::unique_ptr<File> file;
+    size_t total_values;           // total number of uint64_t in the chunk
+    size_t values_read;            // how many values read so far from the chunk
+    std::vector<uint64_t> buffer;  // buffer for k-way merge
+    size_t buffer_idx;             // current position in buffer
 
-    bool operator>(const ChunkData &other) const {
-        return value > other.value;
-    }
+    // Constructor
+    ChunkReader(std::unique_ptr<File> f, size_t num_vals)
+        : file(std::move(f)),
+          total_values(num_vals),
+          values_read(0),
+          buffer_idx(0) {}
 };
 
-void external_sort(File &input, size_t num_values, File &output, size_t mem_size) {
-    /* To be implemented
-    ** Remove these before you start your implementation
-    */
+/**
+ * loads the next batch of data (up to 'batch_size' 64-bit values)
+ * from the chunk file into the chunk buffer and returns the number of new values loaded.
+ */
+size_t load_next_batch(ChunkReader &cr, size_t batch_size) {
+    // Determine how many values are left in this chunk
+    size_t remaining = cr.total_values - cr.values_read;
+    if (remaining == 0) {
+        return 0; // no more data to load
+    }
 
+    // We'll read either 'batch_size' or 'remaining', whichever is smaller
+    size_t to_read = std::min(batch_size, remaining);
+
+    cr.buffer.resize(to_read);
+    cr.buffer_idx = 0; // reset index in buffer
+
+    cr.file->read_block(
+        cr.values_read * sizeof(uint64_t),    // offset in bytes
+        to_read * sizeof(uint64_t),           // size in bytes
+        reinterpret_cast<char*>(cr.buffer.data())
+    );
+
+    cr.values_read += to_read;
+    return to_read;
+}
+
+void k_way_merge(std::vector<ChunkReader> &chunk_readers,
+                 File &output,
+                 size_t mem_size) {
+    size_t write_offset = 0;
+    size_t num_chunks = chunk_readers.size();
+    if (num_chunks == 0) {
+        return; // nothing to merge
+    }
+
+    // We want to allocate some memory for:
+    //   1) The output buffer
+    //   2) The chunk buffers (one for each chunk)
+    //
+    // Simple approach from the example: divide memory equally among
+    // all chunk readers + 1 output buffer.
+    // SEE: https://en.wikipedia.org/wiki/External_sorting
+    // https://web.archive.org/web/20150208064321/http://faculty.simpson.edu/lydia.sinapova/www/cmsc250/LN250_Weiss/L17-ExternalSortEX1.htm
+    // https://web.archive.org/web/20150202022830/http://faculty.simpson.edu/lydia.sinapova/www/cmsc250/LN250_Weiss/L17-ExternalSortEX2.htm
+    // NOTE: each entry is sizeof(uint64_t) bytes, so we compute how many
+    // 64-bit values can fit in 'mem_size'.
+    size_t total_capacity_in_values = mem_size / sizeof(uint64_t);
+    if (total_capacity_in_values < num_chunks + 1) {
+        // Not enough memory to have 1 value per chunk + 1 in output buffer
+        // This is a corner case: you'd normally want at least some memory.
+        // We'll just bail or throw an error for simplicity.
+        throw std::runtime_error(
+            "Not enough memory to perform a multi-way merge for all runs."
+        );
+    }
+
+    // One naive approach is to let them be all the same size. Another approach
+    // is from the wiki: each chunk buffer is mem_size/(num_chunks+1).
+    size_t chunk_buf_size = total_capacity_in_values / (num_chunks + 1);
+    size_t out_buf_size   = chunk_buf_size; // we keep it the same for simplicity
+
+    // Prepare an output buffer
+    std::vector<uint64_t> out_buffer;
+    // reserve is better than resize because it doesn't actually initialize the elements
+    // learnt it from rust
+    out_buffer.reserve(out_buf_size);
+    out_buffer.clear();
+
+    // Load initial batch from each chunk
+    // for example:
+    //       3, 17, 20, 25, 30, 69
+    //       1, 16, 21, 26, 29, 70
+    // this will load 3, 17, 20 and 1, 16, 21 so that we can start the merge
+    // then 1, 3, 16, 17, 20, 21 will be written to the output buffer
+    // and then 25, 26, 29, 30, 69, 70 will be loaded
+    // we keep track of the index of the buffer so that we know which one to load next
+    //
+    for (auto &cr : chunk_readers) {
+        load_next_batch(cr, chunk_buf_size);
+    }
+
+    // Build a min-heap (priority queue) that will store
+    //    (current_value, chunk_id)
+    //    so that we can always pop the smallest value across all chunks.
+    using PQItem = std::pair<uint64_t, size_t>;  // (value, which_chunk)
+    auto cmp = [](const PQItem &a, const PQItem &b) {
+        return a.first > b.first; // min-heap based on 'value'
+    };
+    std::priority_queue<PQItem, std::vector<PQItem>, decltype(cmp)> min_heap(cmp);
+
+    // Push the front element of each chunk (if not empty) into the heap
+    for (size_t i = 0; i < num_chunks; i++) {
+        if (!chunk_readers[i].buffer.empty()) {
+            min_heap.push({chunk_readers[i].buffer[0], i});
+        }
+    }
+
+    // For the K-way-merge, the std::priority_queue data structure or these heap functions std::make_heap(), std::push_heap(), and std::pop_heap() will come in handy.
+    while (!min_heap.empty()) {
+        // Pop the smallest element
+        auto [val, cid] = min_heap.top();
+        min_heap.pop();
+
+        // Push to the out_buffer
+        out_buffer.push_back(val);
+        if (out_buffer.size() == out_buf_size) {
+            size_t bytes_to_write = out_buf_size * sizeof(uint64_t);
+            // Resize so we can safely write
+            output.resize(write_offset + bytes_to_write);
+            // Actually write
+            output.write_block(
+                reinterpret_cast<char*>(out_buffer.data()),
+                write_offset,
+                bytes_to_write
+            );
+            // Increment offset
+            write_offset += bytes_to_write;
+
+            out_buffer.clear();
+        }
+
+        // Move that chunk's buffer index forward
+        ChunkReader &cr = chunk_readers[cid];
+        cr.buffer_idx++;
+        // If the chunk buffer is exhausted, we load more from that chunk file
+        if (cr.buffer_idx >= cr.buffer.size()) {
+            // load next batch
+            size_t loaded = load_next_batch(cr, chunk_buf_size);
+            if (loaded > 0) {
+                // we have new data, so push the front of this new batch
+                min_heap.push({cr.buffer[0], cid});
+            }
+        } else {
+            // The chunk still has elements in the buffer, push next element
+            min_heap.push({cr.buffer[cr.buffer_idx], cid});
+        }
+    }
+
+    // Flush any remaining data in out_buffer
+    if (!out_buffer.empty()) {
+        size_t bytes_to_write = out_buffer.size() * sizeof(uint64_t);
+        output.resize(write_offset + bytes_to_write);
+        output.write_block(
+            reinterpret_cast<char*>(out_buffer.data()),
+            write_offset,
+            bytes_to_write
+        );
+        write_offset += bytes_to_write;
+        out_buffer.clear();
+    }
+}
+
+/**
+ * External sort:
+ *  - Phase 1: Break into sorted runs (already shown).
+ *  - Phase 2: Merge those runs (k-way merge).
+ */
+void external_sort(File &input, size_t num_values, File &output, size_t mem_size) {
+    // ============ Phase 1: Sort chunks in-memory and write them out ============
     std::vector<std::unique_ptr<File>> chunk_files;
+    std::vector<size_t> chunk_sizes; // how many values in each run
+
+    // how many 64-bit integers fit in 'mem_size'
     size_t chunk_size = mem_size / sizeof(uint64_t);
     std::vector<uint64_t> buffer(chunk_size);
-    std::cout << "Chunk size: " << chunk_size << std::endl;
 
+    // std::cout << "[Phase 1] chunk_size (in 64-bit values) = " << chunk_size << std::endl;
 
     for (size_t offset = 0; offset < num_values; offset += chunk_size) {
-        auto chunk_file = File::make_temporary_file();
+        // create a new temporary file for each run
+        chunk_files.push_back(File::make_temporary_file());
         size_t current_chunk_size = std::min(chunk_size, num_values - offset);
 
         input.read_block(
@@ -71,61 +224,41 @@ void external_sort(File &input, size_t num_values, File &output, size_t mem_size
             current_chunk_size * sizeof(uint64_t),
             reinterpret_cast<char*>(buffer.data())
         );
-        std::sort(buffer.begin(), buffer.end(), [&](const uint64_t a, const uint64_t b) {
-            return a < b;
-        });
-        chunk_file->resize(current_chunk_size*sizeof(uint64_t));
-        chunk_file->write_block(
+
+        // sort in-memory
+        std::sort(buffer.begin(), buffer.begin() + current_chunk_size);
+        chunk_files.back()->resize(current_chunk_size * sizeof(uint64_t));
+        // write out the sorted chunk
+        chunk_files.back()->write_block(
             reinterpret_cast<char*>(buffer.data()),
             0,
             current_chunk_size * sizeof(uint64_t)
         );
-        chunk_files.push_back(std::move(chunk_file));
-        // print the chunk
-        // std::cout << "Printing data " << std::endl;
-        // for (size_t i = 0; i < current_chunk_size; i++) {
-        //    std::cout << buffer[i] << " ";
-        // }
-        // std::cout << std::endl;
+
+        // keep track of how many values are in this chunk
+        chunk_sizes.push_back(current_chunk_size);
+
+        // std::cout << "[Phase 1] Created sorted run with " << current_chunk_size << " values\n";
     }
 
-    // k way merge
-
-    std::priority_queue<ChunkData,
-        std::vector<ChunkData>,
-        std::greater<ChunkData>> pq;
-
-
-    for (size_t i = 0; i < chunk_files.size(); ++i) {
-        uint64_t value;
-        chunk_files[i]->read_block(0, sizeof(uint64_t), reinterpret_cast<char*>(&value));
-        pq.push({value, i, 0});
+    // ============ Phase 2: K-way merge all chunk files into 'output' ============
+    std::vector<ChunkReader> chunk_readers;
+    chunk_readers.reserve(chunk_files.size());
+    for (size_t i = 0; i < chunk_files.size(); i++) {
+        // emplace back instead of push_back
+        // https://stackoverflow.com/questions/4303513/push-back-vs-emplace-back
+        chunk_readers.emplace_back(std::move(chunk_files[i]), chunk_sizes[i]);
     }
 
-    size_t output_pos = 0;
-    while (!pq.empty()) {
-        ChunkData current = pq.top();
-        pq.pop();
-        output.write_block(
-            reinterpret_cast<char*>(&current.value),
-            output_pos,
-            sizeof(uint64_t)
-        );
-        output_pos += sizeof(uint64_t);
+    // Now do the k-way merge
+    // stupid bug because of resize
+    // should not assume that specified size will meet requirement
+    // https://buzzdb-docs.readthedocs.io/part2/lab1.html point 5
+    // 5. Do not forget to resize the temporary file as needed.
 
-        if (current.index + 1 < chunk_size) {
-            uint64_t value;
-            chunk_files[current.chunk_index]->read_block(
-                (current.index + 1) * sizeof(uint64_t),
-                sizeof(uint64_t),
-                reinterpret_cast<char*>(&value)
-            );
-            pq.push({value, current.chunk_index, current.index + 1});
-        }
-    }
+    k_way_merge(chunk_readers, output, mem_size);
 
-    // no need to remove temp files, unique ptr
-    // should remove automatically
+    std::cout << "[Phase 2] Merge completed. Final sorted data is in 'output'.\n";
 }
 
 }  // namespace buzzdb
