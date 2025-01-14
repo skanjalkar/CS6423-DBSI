@@ -74,7 +74,6 @@ size_t load_next_batch(ChunkReader &cr, size_t batch_size) {
 void k_way_merge(std::vector<ChunkReader> &chunk_readers,
                  File &output,
                  size_t mem_size) {
-    // Number of chunks (runs)
     size_t write_offset = 0;
     size_t num_chunks = chunk_readers.size();
     if (num_chunks == 0) {
@@ -102,8 +101,6 @@ void k_way_merge(std::vector<ChunkReader> &chunk_readers,
         );
     }
 
-    // We'll let each chunk have a buffer of size chunk_buf_size, and the output
-    // buffer be out_buf_size.
     // One naive approach is to let them be all the same size. Another approach
     // is from the wiki: each chunk buffer is mem_size/(num_chunks+1).
     size_t chunk_buf_size = total_capacity_in_values / (num_chunks + 1);
@@ -111,15 +108,25 @@ void k_way_merge(std::vector<ChunkReader> &chunk_readers,
 
     // Prepare an output buffer
     std::vector<uint64_t> out_buffer;
+    // reserve is better than resize because it doesn't actually initialize the elements
+    // learnt it from rust
     out_buffer.reserve(out_buf_size);
     out_buffer.clear();
 
-    // 1) Load initial batch from each chunk
+    // Load initial batch from each chunk
+    // for example:
+    //       3, 17, 20, 25, 30, 69
+    //       1, 16, 21, 26, 29, 70
+    // this will load 3, 17, 20 and 1, 16, 21 so that we can start the merge
+    // then 1, 3, 16, 17, 20, 21 will be written to the output buffer
+    // and then 25, 26, 29, 30, 69, 70 will be loaded
+    // we keep track of the index of the buffer so that we know which one to load next
+    //
     for (auto &cr : chunk_readers) {
         load_next_batch(cr, chunk_buf_size);
     }
 
-    // 2) Build a min-heap (priority queue) that will store
+    // Build a min-heap (priority queue) that will store
     //    (current_value, chunk_id)
     //    so that we can always pop the smallest value across all chunks.
     using PQItem = std::pair<uint64_t, size_t>;  // (value, which_chunk)
@@ -135,7 +142,7 @@ void k_way_merge(std::vector<ChunkReader> &chunk_readers,
         }
     }
 
-    // 3) Repeatedly pop from the heap, output the smallest, then read next from that chunk
+    // For the K-way-merge, the std::priority_queue data structure or these heap functions std::make_heap(), std::push_heap(), and std::pop_heap() will come in handy.
     while (!min_heap.empty()) {
         // Pop the smallest element
         auto [val, cid] = min_heap.top();
@@ -176,7 +183,7 @@ void k_way_merge(std::vector<ChunkReader> &chunk_readers,
         }
     }
 
-    // 4) Flush any remaining data in out_buffer
+    // Flush any remaining data in out_buffer
     if (!out_buffer.empty()) {
         size_t bytes_to_write = out_buffer.size() * sizeof(uint64_t);
         output.resize(write_offset + bytes_to_write);
@@ -204,7 +211,7 @@ void external_sort(File &input, size_t num_values, File &output, size_t mem_size
     size_t chunk_size = mem_size / sizeof(uint64_t);
     std::vector<uint64_t> buffer(chunk_size);
 
-    std::cout << "[Phase 1] chunk_size (in 64-bit values) = " << chunk_size << std::endl;
+    // std::cout << "[Phase 1] chunk_size (in 64-bit values) = " << chunk_size << std::endl;
 
     for (size_t offset = 0; offset < num_values; offset += chunk_size) {
         // create a new temporary file for each run
@@ -230,14 +237,15 @@ void external_sort(File &input, size_t num_values, File &output, size_t mem_size
         // keep track of how many values are in this chunk
         chunk_sizes.push_back(current_chunk_size);
 
-        // (Optional) debug print
-        std::cout << "[Phase 1] Created sorted run with " << current_chunk_size << " values\n";
+        // std::cout << "[Phase 1] Created sorted run with " << current_chunk_size << " values\n";
     }
 
     // ============ Phase 2: K-way merge all chunk files into 'output' ============
     std::vector<ChunkReader> chunk_readers;
     chunk_readers.reserve(chunk_files.size());
     for (size_t i = 0; i < chunk_files.size(); i++) {
+        // emplace back instead of push_back
+        // https://stackoverflow.com/questions/4303513/push-back-vs-emplace-back
         chunk_readers.emplace_back(std::move(chunk_files[i]), chunk_sizes[i]);
     }
 
