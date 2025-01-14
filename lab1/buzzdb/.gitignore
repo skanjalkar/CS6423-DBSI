@@ -522,3 +522,4 @@ docs/dev
 
 # Third Party
 third_party/
+*.zip
