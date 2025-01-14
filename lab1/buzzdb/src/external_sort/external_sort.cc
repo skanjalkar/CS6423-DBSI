@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -40,6 +41,16 @@ For example, for sorting 900 megabytes of data using only 100 megabytes of RAM:
 
 namespace buzzdb {
 
+struct ChunkData {
+    uint64_t value;
+    size_t chunk_index;
+    size_t index;
+
+    bool operator>(const ChunkData &other) const {
+        return value > other.value;
+    }
+};
+
 void external_sort(File &input, size_t num_values, File &output, size_t mem_size) {
     /* To be implemented
     ** Remove these before you start your implementation
@@ -52,7 +63,7 @@ void external_sort(File &input, size_t num_values, File &output, size_t mem_size
 
 
     for (size_t offset = 0; offset < num_values; offset += chunk_size) {
-        chunk_files.push_back(File::make_temporary_file());
+        auto chunk_file = File::make_temporary_file();
         size_t current_chunk_size = std::min(chunk_size, num_values - offset);
 
         input.read_block(
@@ -63,22 +74,58 @@ void external_sort(File &input, size_t num_values, File &output, size_t mem_size
         std::sort(buffer.begin(), buffer.end(), [&](const uint64_t a, const uint64_t b) {
             return a < b;
         });
-
-        chunk_files.back()->write_block(
+        chunk_file->resize(current_chunk_size*sizeof(uint64_t));
+        chunk_file->write_block(
             reinterpret_cast<char*>(buffer.data()),
             0,
             current_chunk_size * sizeof(uint64_t)
         );
-
+        chunk_files.push_back(std::move(chunk_file));
         // print the chunk
-        std::cout << "Printing data " << std::endl;
-        for (size_t i = 0; i < current_chunk_size; i++) {
-           std::cout << buffer[i] << " ";
-        }
-        std::cout << std::endl;
+        // std::cout << "Printing data " << std::endl;
+        // for (size_t i = 0; i < current_chunk_size; i++) {
+        //    std::cout << buffer[i] << " ";
+        // }
+        // std::cout << std::endl;
     }
 
-    UNUSED(output);
+    // k way merge
+
+    std::priority_queue<ChunkData,
+        std::vector<ChunkData>,
+        std::greater<ChunkData>> pq;
+
+
+    for (size_t i = 0; i < chunk_files.size(); ++i) {
+        uint64_t value;
+        chunk_files[i]->read_block(0, sizeof(uint64_t), reinterpret_cast<char*>(&value));
+        pq.push({value, i, 0});
+    }
+
+    size_t output_pos = 0;
+    while (!pq.empty()) {
+        ChunkData current = pq.top();
+        pq.pop();
+        output.write_block(
+            reinterpret_cast<char*>(&current.value),
+            output_pos,
+            sizeof(uint64_t)
+        );
+        output_pos += sizeof(uint64_t);
+
+        if (current.index + 1 < chunk_size) {
+            uint64_t value;
+            chunk_files[current.chunk_index]->read_block(
+                (current.index + 1) * sizeof(uint64_t),
+                sizeof(uint64_t),
+                reinterpret_cast<char*>(&value)
+            );
+            pq.push({value, current.chunk_index, current.index + 1});
+        }
+    }
+
+    // no need to remove temp files, unique ptr
+    // should remove automatically
 }
 
 }  // namespace buzzdb
