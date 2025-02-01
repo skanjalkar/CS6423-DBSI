@@ -1,71 +1,63 @@
+// log_manager.h
+
 #pragma once
 
-#include <atomic>
+#include <cstddef>
 #include <map>
-#include <memory>
-
+#include <string>
 #include "buffer/buffer_manager.h"
-#include "storage/test_file.h"
+#include "storage/file.h"
 
 namespace buzzdb {
 
 class LogManager {
-   public:
-    enum class LogRecordType {
-        INVALID_RECORD_TYPE,
-        ABORT_RECORD,
-        COMMIT_RECORD,
-        UPDATE_RECORD,
-        BEGIN_RECORD,
-        CHECKPOINT_RECORD
-    };
+ public:
+  enum class LogRecordType {
+    INVALID_RECORD_TYPE,
+    ABORT_RECORD,
+    COMMIT_RECORD,
+    UPDATE_RECORD,
+    BEGIN_RECORD,
+    CHECKPOINT_RECORD
+  };
 
-    /// Constructor.
-    LogManager(File* log_file);
+  // Constructor / Destructor
+  LogManager(File* log_file);
+  ~LogManager();
 
-    /// Destructor.
-    ~LogManager();
+  // Logging methods
+  void log_abort(uint64_t txn_id, BufferManager& buffer_manager);
+  void log_commit(uint64_t txn_id);
+  void log_update(uint64_t txn_id, uint64_t page_id, uint64_t length,
+                  uint64_t offset, std::byte* before_img, std::byte* after_img);
+  void log_txn_begin(uint64_t txn_id);
+  void log_checkpoint(BufferManager& buffer_manager);
 
-    /// Add an abort record
-    void log_abort(uint64_t txn_id, BufferManager& buffer_manager);
+  // Recovery
+  void recovery(BufferManager& buffer_manager);
+  void rollback_txn(uint64_t txn_id, BufferManager& buffer_manager);
 
-    /// Add a commit record
-    void log_commit(uint64_t txn_id);
+  // Reset state (simulate crash)
+  void reset(File* log_file);
 
-    /// Add an update record
-    void log_update(uint64_t txn_id, uint64_t page_id, uint64_t length, uint64_t offset,
-                    std::byte* before_img, std::byte* after_img);
+  // Stats for the unit tests
+  uint64_t get_total_log_records();
+  uint64_t get_total_log_records_of_type(LogRecordType type);
 
-    /// Add a txn begin record
-    void log_txn_begin(uint64_t txn_id);
+ private:
+  File* log_file_;
+  size_t current_offset_ = 0;
 
-    /// Add a log checkpoint record
-    void log_checkpoint(BufferManager& buffer_manager);
+  // This map tracks the first log offset for each txn.
+  std::map<uint64_t, uint64_t> txn_id_to_first_log_record;
+  // Tally of record types for tests
+  std::map<LogRecordType, uint64_t> log_record_type_to_count;
 
-    /// recovery
-    void recovery(BufferManager& buffer_manager);
+  // Helper to actually write len bytes from src into log_file_ at current_offset_.
+  void WriteToLog(const void* src, size_t len);
 
-    /// rollback a txn
-    void rollback_txn(uint64_t txn_id, BufferManager& buffer_manager);
-
-    /// Get log records
-    uint64_t get_total_log_records();
-
-    /// Get log records of a given type
-    uint64_t get_total_log_records_of_type(LogRecordType type);
-
-    /// reset the state, used to simulate crash
-    void reset(File* log_file);
-
-   private:
-    File* log_file_;
-
-    // offset in the file
-    size_t current_offset_ = 0;
-
-    std::map<uint64_t, uint64_t> txn_id_to_first_log_record;
-
-    std::map<LogRecordType, uint64_t> log_record_type_to_count;
+  // Helper to flush writes. In O_SYNC mode this is often a no-op, but we keep it for clarity.
+  void ForceFlush(File* file);
 };
 
 }  // namespace buzzdb
