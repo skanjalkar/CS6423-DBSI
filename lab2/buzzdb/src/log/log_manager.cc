@@ -52,7 +52,13 @@ void LogManager::reset(File* log_file) {
 }
 
 /// Get log records
-uint64_t LogManager::get_total_log_records() { return 0; }
+uint64_t LogManager::get_total_log_records() {
+    uint64_t total = 0;
+    for (auto& it : log_record_type_to_count) {
+        total += it.second;
+    }
+    return total;
+}
 
 uint64_t LogManager::get_total_log_records_of_type(UNUSED_ATTRIBUTE LogRecordType type) {
     return 0;
