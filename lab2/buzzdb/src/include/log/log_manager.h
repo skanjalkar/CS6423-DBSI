@@ -66,6 +66,8 @@ class LogManager {
     std::map<uint64_t, uint64_t> txn_id_to_first_log_record;
 
     std::map<LogRecordType, uint64_t> log_record_type_to_count;
+
+    void WriteToLog(const void* src, size_t len);
 };
 
 }  // namespace buzzdb

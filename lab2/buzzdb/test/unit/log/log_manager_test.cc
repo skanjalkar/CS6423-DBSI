@@ -26,8 +26,8 @@ constexpr uint64_t HEAP_SEGMENT = 123;
 namespace {
 
 class LogManagerTest: public ::testing::Test{
-	void SetUp() { 
-		auto file_handle = File::open_file(std::to_string(HEAP_SEGMENT).c_str(), 
+	void SetUp() {
+		auto file_handle = File::open_file(std::to_string(HEAP_SEGMENT).c_str(),
 	   										File::WRITE);
 		file_handle->resize(0);
        	auto log_handle = File::open_file(LOG_FILE, File::WRITE);
@@ -133,7 +133,7 @@ void do_insert(HeapSegment& heap_segment,
 		BufferManager& buffer_manager,
 		uint64_t table_id, uint64_t field_1, uint64_t field_2){
 	auto txn_id = transaction_manager.start_txn();
-	
+
 	if(field_1 != INVALID_FIELD){
 		insert_row(heap_segment, transaction_manager,txn_id, table_id, field_1);
 	}
@@ -151,7 +151,7 @@ void abort(TransactionManager& transaction_manager,
 		BufferManager& buffer_manager,
 		uint64_t txn_id){
 	buffer_manager.flush_all_pages(); // DEFEAT NO-STEAL
-	transaction_manager.abort_txn(txn_id);	
+	transaction_manager.abort_txn(txn_id);
 }
 
 /* Insert tuples
@@ -162,14 +162,14 @@ void dont_insert(HeapSegment& heap_segment,
 		TransactionManager& transaction_manager,
 		BufferManager& buffer_manager,
 		uint64_t table_id, uint64_t field_1, uint64_t field_2){
-	
+
 	auto txn_id = transaction_manager.start_txn();
 
 	if(field_1 != INVALID_FIELD){
 		insert_row(heap_segment, transaction_manager, txn_id, table_id, field_1);
 	}
 
-	
+
 	if(field_2 != INVALID_FIELD){
 		insert_row(heap_segment, transaction_manager, txn_id, table_id, field_2);
 	}
@@ -184,7 +184,7 @@ void dont_insert(HeapSegment& heap_segment,
 */
 
 void crash(TransactionManager& transaction_manager,
-		BufferManager& buffer_manager, 
+		BufferManager& buffer_manager,
 		LogManager log_manager){
 	buffer_manager.discard_all_pages();
 	auto log_file = buzzdb::File::open_file(LOG_FILE, buzzdb::File::WRITE);
@@ -204,7 +204,7 @@ TEST_F(LogManagerTest, LogRecordTest) {
 	uint64_t table_id = 101;
 	do_insert(heap_segment, transaction_manager, buffer_manager,
 			table_id, 5, 10);
-	
+
 	// check number of log records
     EXPECT_EQ(log_manager.get_total_log_records(), 4);
 
@@ -252,8 +252,8 @@ TEST_F(LogManagerTest, TestCommitCrash){
 	LogManager log_manager(logfile.get());
 	HeapSegment heap_segment(123, log_manager, buffer_manager);
 	TransactionManager transaction_manager(log_manager, buffer_manager);
-	
-	
+
+
 	uint64_t table_id = 101;
 	do_insert(heap_segment, transaction_manager, buffer_manager,
 			table_id, 5, 10);
@@ -267,11 +267,11 @@ TEST_F(LogManagerTest, TestCommitCrash){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 3, false));
 
-} 
+}
 
 
 /* insert, abort: data should not be there
- * flush pages directly to the heap file to defeat NO-STEAL policy	
+ * flush pages directly to the heap file to defeat NO-STEAL policy
 */
 TEST_F(LogManagerTest, TestAbort){
 	BufferManager buffer_manager(128, 10);
@@ -279,10 +279,10 @@ TEST_F(LogManagerTest, TestAbort){
 	LogManager log_manager(logfile.get());
 	HeapSegment heap_segment(123, log_manager, buffer_manager);
 	TransactionManager transaction_manager(log_manager, buffer_manager);
-	
+
 
 	uint64_t table_id = 101;
-	
+
 	do_insert(heap_segment, transaction_manager, buffer_manager,
 			table_id, 5, 10);
 
@@ -293,7 +293,7 @@ TEST_F(LogManagerTest, TestAbort){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 3, false));	
+			table_id, 3, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, false));
 
@@ -308,13 +308,13 @@ TEST_F(LogManagerTest, TestAbortCommitInterleaved){
 	LogManager log_manager(logfile.get());
 	HeapSegment heap_segment(HEAP_SEGMENT, log_manager, buffer_manager);
 	TransactionManager transaction_manager(log_manager, buffer_manager);
-	
-	
+
+
 	uint64_t table_id = 101;
 	uint64_t txn_1 = transaction_manager.start_txn();
-	
+
 	insert_row(heap_segment, transaction_manager, txn_1, table_id, 5);
-	
+
 	uint64_t txn_2 = transaction_manager.start_txn();
 
 	insert_row(heap_segment, transaction_manager, txn_2, table_id, 3);
@@ -332,10 +332,10 @@ TEST_F(LogManagerTest, TestAbortCommitInterleaved){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 5, false));	
+			table_id, 5, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, false));
-	
+
 
 }
 
@@ -348,11 +348,11 @@ TEST_F(LogManagerTest, TestAbortCrash){
 	LogManager log_manager(logfile.get());
 	HeapSegment heap_segment(123, log_manager, buffer_manager);
 	TransactionManager transaction_manager(log_manager, buffer_manager);
-	
+
 	uint64_t table_id = 101;
 	do_insert(heap_segment, transaction_manager, buffer_manager,
 			table_id, 5, 10);
-	
+
 	dont_insert(heap_segment, transaction_manager, buffer_manager, table_id, 3, 4);
 
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
@@ -360,23 +360,23 @@ TEST_F(LogManagerTest, TestAbortCrash){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 3, false));	
+			table_id, 3, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, false));
 
 	crash(transaction_manager, buffer_manager, log_manager);
-	
+
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 5, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 3, false));	
+			table_id, 3, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, false));
 }
 
-/** 
+/**
  * T1 inserts and commits
  * T2 inserts and aborts
  * T3 inserts and commits
@@ -403,14 +403,14 @@ TEST_F(LogManagerTest, TestCommitAbortCommitCrash){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 3, false));	
+			table_id, 3, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 1, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 2, true));
-	
+
 
 	// crash
 
@@ -421,7 +421,7 @@ TEST_F(LogManagerTest, TestCommitAbortCommitCrash){
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 10, true));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
-			table_id, 3, false));	
+			table_id, 3, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
 			table_id, 4, false));
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
@@ -431,7 +431,7 @@ TEST_F(LogManagerTest, TestCommitAbortCommitCrash){
 
 }
 
-/** 
+/**
  * insert but no commit
  * crash
  * data should not be there
@@ -449,11 +449,11 @@ TEST_F(LogManagerTest, TestOpenCrash){
 	uint64_t txn_id =transaction_manager.start_txn();
 
 	insert_row(heap_segment, transaction_manager, txn_id, table_id, 5);
-	
+
 	buffer_manager.flush_all_pages(); // requires undo
 
 	insert_row(heap_segment, transaction_manager, txn_id, table_id, 10);
-	
+
 	crash(transaction_manager, buffer_manager, log_manager);
 
 	EXPECT_TRUE(look(heap_segment, transaction_manager, buffer_manager,
@@ -463,7 +463,7 @@ TEST_F(LogManagerTest, TestOpenCrash){
 
 }
 
-/** 
+/**
  * T1 inserts but does not commits
  * T2 inserts and commits
  * T3 inserts but does not commits
@@ -482,7 +482,7 @@ TEST_F(LogManagerTest, TestOpenCommitOpenCrash){
 	// T1
 	uint64_t t1 = transaction_manager.start_txn();
 	insert_row(heap_segment, transaction_manager, t1, table_id, 5);
-	buffer_manager.flush_all_pages(); // defeat no steal 
+	buffer_manager.flush_all_pages(); // defeat no steal
 	// T2
 	do_insert(heap_segment, transaction_manager, buffer_manager, table_id, 3, 4);
 
@@ -505,7 +505,7 @@ TEST_F(LogManagerTest, TestOpenCommitOpenCrash){
 }
 
 
-/** 
+/**
  * T1 inserts but does not commits
  * T2 inserts and commits
  * checkpoint
@@ -520,12 +520,12 @@ TEST_F(LogManagerTest, TestOpenCommitCheckpointOpenCrash){
 	LogManager log_manager(logfile.get());
 	HeapSegment heap_segment(123, log_manager, buffer_manager);
 	TransactionManager transaction_manager(log_manager, buffer_manager);
-	
+
 	uint64_t table_id = 101;
 	// T1
 	uint64_t t1 = transaction_manager.start_txn();
 	insert_row(heap_segment, transaction_manager, t1, table_id, 5);
-	buffer_manager.flush_all_pages(); // defeat no steal 
+	buffer_manager.flush_all_pages(); // defeat no steal
 	// T2
 	do_insert(heap_segment, transaction_manager, buffer_manager, table_id, 3, 4);
 
