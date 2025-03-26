@@ -48,38 +48,38 @@ The code shows you're following Rust best practices with:
 
 ### Storage Layer
 
-- [ ] Implement SlottedPage
-    - [ ] Create struct and methods for page management
-    - [ ] Implement slot allocation and deallocation
-    - [ ] Add serialization/deserialization
-- [ ] Implement HeapSegment
-    - [ ] Create segment management
-    - [ ] Implement page allocation
-    - [ ] Add record operations (insert, update, delete)
-- [ ] Implement TID (Tuple Identifier)
-    - [ ] Create TID struct
-    - [ ] Implement comparison traits
+- [x] Implement SlottedPage
+    - [x] Create struct and methods for page management
+    - [x] Implement slot allocation and deallocation
+    - [x] Add serialization/deserialization
+- [x] Implement HeapSegment
+    - [x] Create segment management
+    - [x] Implement page allocation
+    - [x] Add record operations (insert, update, delete)
+- [x] Implement TID (Tuple Identifier)
+    - [x] Create TID struct
+    - [x] Implement comparison traits
 
 
 ### Buffer Management
 
-- [ ] Implement BufferManager
-    - [ ] Create page replacement policy
-    - [ ] Implement page pinning/unpinning
-    - [ ] Add dirty page tracking
-    - [ ] Implement buffer pool
+- [x] Implement BufferManager
+    - [x] Create page replacement policy
+    - [x] Implement page pinning/unpinning
+    - [x] Add dirty page tracking
+    - [x] Implement buffer pool
 
 
 ### Logging System
 
-- [ ] Implement LogManager
-    - [ ] Create log record structures
-    - [ ] Implement log writing
-    - [ ] Add log reading for recovery
-- [ ] Implement ARIES protocol
-    - [ ] Analysis phase
-    - [ ] Redo phase
-    - [ ] Undo phase
+- [x] Implement LogManager
+    - [x] Create log record structures
+    - [x] Implement log writing
+    - [x] Add log reading for recovery
+- [x] Implement ARIES protocol
+    - [x] Analysis phase
+    - [x] Redo phase
+    - [x] Undo phase
 
 
 ### Transaction Management
