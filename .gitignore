@@ -30,3 +30,75 @@
 *.exe
 *.out
 *.app
+
+# Rust build artifacts
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock  # Uncomment if this is a library
+
+# Generated documentation
+/doc/
+
+# Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vs/
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.ilk
+
+# Log files
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test output files
+temp_log.dat
+
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.pdf  # Remove this line if you want to commit PDFs
+
+# clangd and other IDE caches
+.cache/
+.clangd/
+compile_commands.json
+.cmake/
+CMakeFiles/
+CMakeCache.txt
+build/
+
+# Specific to your project
+# Add any project-specific files that shouldn't be committed
+ExerciseSheets/*.aux
+ExerciseSheets/*.log
+ExerciseSheets/*.pdf
+LectureNotes/*.pdf
+ProblemSet/*.pdf
+
+# Environment variables and secrets
+.env
+*.secret
+
+*__MACOSX/

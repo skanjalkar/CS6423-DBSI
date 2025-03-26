@@ -1,0 +1,325 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,enumerate,fullpage}
+\begin{document}
+
+%------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
+% NOTE TO THE READER:
+% This document contains ONLY the answers (in concise form) for
+% Exercise Sheet 2. The questions themselves are not repeated here.
+%------------------------------------------------------------------------------
+
+\section*{Answers to Exercise Sheet 2}
+
+\subsection*{Answer 1: Serializability and 2PL}
+
+\subsubsection*{(a)}
+\begin{enumerate}
+  \item No
+  \item No
+  \item Yes
+  \item No
+  \item No
+\end{enumerate}
+
+\subsubsection*{(b)}
+\paragraph{(i)}
+No. The operations are interleaved, so the schedule is not strictly one transaction after another.
+
+\begin{center}
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|}
+\hline
+\textbf{time} & $t_1$ & $t_2$ & $t_3$ & $t_4$ & $t_5$ & $t_6$ & $t_7$ & $t_8$ & $t_9$ & $t_{10}$ & $t_{11}$ \\
+\hline
+$T_1$ & R(A) &       & W(A) &       &       &       &  &       & R(C) &       & W(C) \\
+\hline
+$T_2$ &      &       &      & R(C) & R(A) &       &  W(A)  &       &      & W(C) &       \\
+\hline
+$T_3$ &      & R(B) &      &       &      & W(C) &      & R(A) &      &      &       \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{(ii)}
+\emph{Dependency Graph} (edges listed as {\small $T_x \to T_y$ because of (data item)}):
+\[
+T_1 \to T_2 \text{ (A, C)}, \quad
+T_2 \to T_3 \text{ (A, C)}, \quad
+T_2 \to T_1 \text{ (C)}, \quad
+T_3 \to T_1 \text{ (C)}.
+\]
+There are cycles (e.g.\ $T_1 \to T_2 \to T_3 \to T_1$ and $T_1 \to T_2 \to T_1$).
+
+\paragraph{(iii)}
+No. Because of the cycles in the precedence graph, it is not conflict-serializable.
+
+\paragraph{(iv)}
+Not applicable (no equivalent serial schedule). The schedule fails conflict-serializability because its precedence graph is cyclic.
+
+\paragraph{(v)}
+No. Since the schedule is not conflict-serializable, it cannot be produced by 2PL (all 2PL schedules are conflict-serializable).
+
+%------------------------------------------------------------------------------
+\subsection*{Answer 2: Optimistic Concurrency Control}
+
+\subsubsection*{(a) \; (Strict 2PL)}
+\begin{enumerate}
+  \item The schedule \texttt{T1: R(A), T2: W(A), T2: Commit, T1: W(A), T1: Commit, T3: R(A), T3: Commit} \\
+  \textbf{No}, it cannot arise under strict 2PL. Once T1 has read~A, T1 holds a shared lock on~A until commit. T2 cannot obtain the exclusive lock to write~A while T1 is active.
+
+  \item The schedule \texttt{T2: R(A), T3: W(B), T3: Commit, T1: W(B), T1: Commit, T2: R(B), T2: W(C), T2: Commit} \\
+  \textbf{Yes}, it can arise under strict 2PL. There is no direct conflict on \texttt{A} between T2 and T3/T1, and T3 commits before T1 starts writing \texttt{B}. T2 only accesses \texttt{B} after T1 has committed.
+\end{enumerate}
+
+\subsubsection*{(b) \; (OCC with Backward Validation)}
+\begin{enumerate}
+  \item \texttt{T1: R(A), T2: W(A), T2: Commit, T1: W(A), T1: Commit, T3: R(A), T3: Commit} \\
+  \textbf{No}, in backward validation T1 would discover that T2 wrote an item (A) that T1 had read, and T2 committed after T1 started. Thus T1 would be forced to abort.
+
+  \item \texttt{T2: R(A), T3: W(B), T3: Commit, T1: W(B), T1: Commit, T2: R(B), T2: W(C), T2: Commit} \\
+  \textbf{No}, T2's read of \texttt{B} conflicts with T1 and T3's writes, failing backward validation. This schedule cannot arise under OCC.
+\end{enumerate}
+
+%------------------------------------------------------------------------------
+\subsection*{Answer 3: Multi-Version Concurrency Control}
+
+\noindent
+\textbf{Schedule:}
+
+\begin{itemize}
+  \item \textbf{Time 1:} $T_1$ begins; it is assigned TS($T_1$) $= 1.$
+  \item \textbf{Time 2:} $T_1$ writes $A = 10$. Also $T_3$ begins with TS($T_3$) $= 2.$
+  \item \textbf{Time 3:} $T_1$ commits; $T_2$ begins with TS($T_2$) $= 3.$
+  \item \textbf{Time 4:} $T_2$ reads $A.$
+  \item \textbf{Time 5:} $T_2$ writes $A = 20.$
+  \item \textbf{Time 6:} $T_2$ commits.
+  \item \textbf{Time 7:} $T_3$ reads $A.$
+  \item \textbf{Time 8:} $T_3$ writes $A = 30.$
+  \item \textbf{Time 9:} $T_3$ attempts to commit.
+\end{itemize}
+
+\noindent
+\textbf{(i) Versions of $A$ created:}
+
+We start with an \emph{initial} version of $A$ (txn-id $=0$, begin-ts $=0$, end-ts $=\infty$, read-ts $=0$, value $=1$). Then:
+
+\begin{itemize}
+  \item \textbf{Initial version:}
+    \[
+      \text{txn-id} = 0, \quad
+      \text{begin-ts} = 0, \quad
+      \text{end-ts} = 1, \quad
+      \text{read-ts} = 0, \quad
+      \text{value} = 1
+    \]
+
+  \item \textbf{$T_1$ writes $A=10$ at Time~2:}
+    Creates a new version:
+    \[
+      \text{txn-id} = 1, \quad
+      \text{begin-ts} = 1, \quad
+      \text{end-ts} = 3, \quad
+      \text{read-ts} = 3, \quad
+      \text{value} = 10
+    \]
+
+  \item \textbf{$T_2$ writes $A=20$ at Time~5:}
+    Creates another version:
+    \[
+      \text{txn-id} = 2, \quad
+      \text{begin-ts} = 3, \quad
+      \text{end-ts} = \infty, \quad
+      \text{read-ts} = 0, \quad
+      \text{value} = 20
+    \]
+
+  \item \textbf{$T_3$ attempts to write $A=30$:}
+    $T_3$ has TS($T_3$) = 2, which conflicts with $T_2$'s newer version. This violates MVTO ordering, causing $T_3$ to abort. No committed version is created.
+\end{itemize}
+
+\noindent
+\textbf{(ii) Values read by $T_2$ and $T_3$:}
+
+\begin{itemize}
+  \item \textbf{$T_2$ reads $A$ at Time~4:}
+    Since $T_2$’s TS is 3, it looks for the version with the largest write-TS $\le 3.$  
+    The version from $T_1$ (TS=1) is valid, so $T_2$ reads \textbf{10}.
+  \item \textbf{$T_3$ reads $A$ at Time~7:}
+    $T_3$’s TS is 2, so it looks for the version of $A$ with write-TS $\le 2.$  
+    The version from $T_2$ has TS=3 (which is $>2$), so $T_3$ cannot see that.  
+    Hence $T_3$ also reads \textbf{10} (the $T_1$ version).
+\end{itemize}
+
+\noindent
+\textbf{(iii) Do all transactions commit?  Justify:}
+
+\begin{itemize}
+  \item $T_1$ commits successfully at \emph{Time~3.}
+  \item $T_2$ commits successfully at \emph{Time~6.}
+  \item \textbf{$T_3$:} Under standard MVTO, an older transaction ($T_3$, TS=2) trying to overwrite a version created by a younger one ($T_2$, TS=3) typically \emph{must abort}, since this would violate the timestamp ordering.  Thus $T_3$ fails its validation (or has its write disallowed) and does \emph{not} commit in a strict MVTO implementation.
+\end{itemize}
+
+\noindent
+Hence the final outcome is that \textbf{$T_1$ and $T_2$ commit, while $T_3$ aborts}.
+%------------------------------------------------------------------------------
+\subsection*{Answer 4: Deadlock Detection and Prevention}
+
+%------------------------------------
+\subsubsection*{(a) \; Deadlock Detection}
+
+\paragraph{(i) Lock Requests \& Grant/Block}
+\begin{table}[!ht]
+\centering
+\begin{tabular}{c|ccccccc}
+\textbf{time} & \textbf{t1} & \textbf{t2} & \textbf{t3} & \textbf{t4} & \textbf{t5} & \textbf{t6} & \textbf{t7} \\
+\hline
+\textbf{T1} &  &  & S(A) & S(B) &  &  & S(C) \\
+\textbf{T2} & S(B) &  &  &  & X(A) &  &  \\
+\textbf{T3} &  & X(C) & &  &  & X(B) &  \\
+\hline
+\textbf{LM} & g & g & g & g & b & b & b \\
+\end{tabular}
+\caption{Lock requests from T1, T2, and T3 across times \textit{t1} through \textit{t7}. 
+``S($\cdot$)'' = shared lock, ``X($\cdot$)'' = exclusive lock. 
+LM row: \texttt{g} = granted, \texttt{b} = blocked, etc.}
+\end{table}
+
+\paragraph{(ii) Wait-for Graph}:
+
+From the lock‐request table, at the final three time steps we see the following conflicts:
+
+\begin{itemize}
+  \item \textbf{Time $t_5$:} 
+    \[
+      T_2 \;\longrightarrow\; T_1 \quad\text{(because of A).}
+    \]
+
+  \item \textbf{Time $t_6$:} 
+    \[
+      T_3 \;\longrightarrow\; T_1 \quad\text{(because of B).}
+    \]
+    (We would similarly have \(T_3 \to T_2\) because of $B$, but for deadlock analysis,
+    seeing one pointer to the holder(s) of $B$ is sufficient.)
+
+  \item \textbf{Time $t_7$:} 
+    \[
+      T_1 \;\longrightarrow\; T_3 \quad\text{(because of C).}
+    \]
+\end{itemize}
+
+\noindent
+Putting these all together in a wait‐for graph:
+
+\[
+  T_2 \;\longrightarrow\; T_1,\quad 
+  T_3 \;\longrightarrow\; T_1,\quad
+  T_1 \;\longrightarrow\; T_3.
+\]
+
+\paragraph{(iii) Is there a deadlock?}
+
+Yes.  From the above edges, we see that \(T_1\) and \(T_3\) are waiting on each other:
+\[
+  T_1 \;\longrightarrow\; T_3 \;\longrightarrow\; T_1,
+\]
+which forms a cycle (a ``mutual wait’’).  Consequently, a deadlock arises. 
+
+%------------------------------------
+\subsubsection*{(b) \; Deadlock Prevention}
+
+\paragraph{(i) Table}
+
+\begin{table}[!htbp]
+\centering
+\begin{tabular}{c|cccccccc}
+\textbf{time} & \textbf{t1} & \textbf{t2} & \textbf{t3} & \textbf{t4} & \textbf{t5} & \textbf{t6} & \textbf{t7} & \textbf{t8} \\
+\hline
+\textbf{T1} & X(B) &        &      & S(A)   &        &        &        &        \\
+\textbf{T2} &      &        &      &        & X(D)   & X(C)   &        &        \\
+\textbf{T3} &      &        & S(C) &        &        &        & X(B)   &        \\
+\textbf{T4} &      & X(A)   &      &        &        &        &        & S(D)   \\
+\hline
+\textbf{LM} & g    & g      & g    & b      & g      & b      & b      & b
+\end{tabular}
+\caption{Lock requests from T1, T2, T3, T4 across times \(t_1\) through \(t_8\). 
+``S(\(\cdot\))'' = shared lock, ``X(\(\cdot\))'' = exclusive lock.}
+\end{table}
+
+\newpage
+\subsubsection*{(ii)~Wait-for Graph}
+\begin{itemize}
+  \item T1 $\rightarrow$ T4 \textbf{because of} A
+  \item T2 $\rightarrow$ T3 \textbf{because of} C
+  \item T3 $\rightarrow$ T1 \textbf{because of} B
+  \item T4 $\rightarrow$ T2 \textbf{because of} D
+\end{itemize}
+
+\subsubsection*{(iii)~Is there a Deadlock?}
+Yes. There is a cycle in the wait-for graph:
+\[
+T1 \;\rightarrow\; T4 \;\rightarrow\; T2 \;\rightarrow\; T3 \;\rightarrow\; T1,
+\]
+so a deadlock arises.
+
+\subsubsection*{(iv)~Wait--Die Policy}
+\begin{table}[!htbp]
+\centering
+\begin{tabular}{c|cccccccc}
+\textbf{time}
+  & \textbf{t1} 
+  & \textbf{t2} 
+  & \textbf{t3} 
+  & \textbf{t4} 
+  & \textbf{t5} 
+  & \textbf{t6} 
+  & \textbf{t7}
+  & \textbf{t8} \\
+\hline
+\textbf{T1}
+  & X(B) &      &      & S(A) &      &      &      &      \\
+\textbf{T2}
+  &      &      &      &      & X(D) & X(C) &      &      \\
+\textbf{T3}
+  &      &      & S(C) &      &      &      & X(B) &      \\
+\textbf{T4}
+  &      & X(A) &      &      &      &      &      & S(D) \\
+\hline
+\textbf{LM}
+  & g    & g    & g    & b    & g    & b    & a    & a    \\
+\end{tabular}
+\caption{Lock requests under Wait--Die, matching the orientation from part (i).}
+\end{table}
+
+\newpage
+\subsubsection*{(v)~Wound--Wait Policy}
+\begin{table}[!htbp]
+\centering
+\begin{tabular}{c|cccccccc}
+\textbf{time}
+  & \textbf{t1} 
+  & \textbf{t2} 
+  & \textbf{t3} 
+  & \textbf{t4} 
+  & \textbf{t5} 
+  & \textbf{t6} 
+  & \textbf{t7}
+  & \textbf{t8} \\
+\hline
+\textbf{T1}
+  & X(B) &      &      & S(A) &      &      &      &      \\
+\textbf{T2}
+  &      &      &      &      & X(D) & X(C) &      &      \\
+\textbf{T3}
+  &      &      & S(C) &      &      &      & X(B) &      \\
+\textbf{T4}
+  &      & X(A) &      &      &      &      &      & S(D) \\
+\hline
+\textbf{LM}
+  & g    & g    & g    & a    & g    & a    & --   & --   \\
+\end{tabular}
+\caption{Lock requests under Wound--Wait, matching the orientation from part (i). 
+``--'' means the request never occurs because that transaction was already wounded/aborted.}
+\end{table}
+
+%------------------------------------------------------------------------------
+\end{document}
