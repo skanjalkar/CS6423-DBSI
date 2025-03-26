@@ -1,7 +1,9 @@
 // src/transaction/mod.rs
+use std::collections::{HashSet, HashMap};
 
-use std::collections::HashSet;
-use crate::common::{TransactionID, PageID, Result};
+use crate::common::{TransactionID, PageID, Result, BuzzDBError};
+use crate::log_mod::LogManager;
+use crate::buffer::BufferManager;
 
 #[derive(Debug)]
 pub struct Transaction {

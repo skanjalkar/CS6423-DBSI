@@ -3,6 +3,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::hash::Hash;
+use std::sync::Arc;
 
 use crate::common::{BuzzDBError, Result, LSN, PageID, TransactionID};
 use crate::buffer::BufferManager;
