@@ -17,7 +17,7 @@
 \begin{enumerate}
   \item No
   \item No
-  \item Yes
+  \item No
   \item No
   \item No
 \end{enumerate}
@@ -46,7 +46,8 @@ $T_3$ &      & R(B) &      &       &      & W(C) &      & R(A) &      &      &  
 T_1 \to T_2 \text{ (A, C)}, \quad
 T_2 \to T_3 \text{ (A, C)}, \quad
 T_2 \to T_1 \text{ (C)}, \quad
-T_3 \to T_1 \text{ (C)}.
+T_3 \to T_1 \text{ (C)}, \quad 
+T_1 \to T_3 \text{ (A)}.
 \]
 There are cycles (e.g.\ $T_1 \to T_2 \to T_3 \to T_1$ and $T_1 \to T_2 \to T_1$).
 
@@ -198,8 +199,9 @@ From the lock‐request table, at the final three time steps we see the followin
     \[
       T_3 \;\longrightarrow\; T_1 \quad\text{(because of B).}
     \]
-    (We would similarly have \(T_3 \to T_2\) because of $B$, but for deadlock analysis,
-    seeing one pointer to the holder(s) of $B$ is sufficient.)
+    \[
+    T_3 \;\longrightarrow\; T_2 \quad\text{(because of B).}
+    \]
 
   \item \textbf{Time $t_7$:} 
     \[
