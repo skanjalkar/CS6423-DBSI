@@ -17,7 +17,7 @@
 \begin{enumerate}
   \item No
   \item No
-  \item No
+  \item Yes
   \item No
   \item No
 \end{enumerate}
@@ -47,7 +47,8 @@ T_1 \to T_2 \text{ (A, C)}, \quad
 T_2 \to T_3 \text{ (A, C)}, \quad
 T_2 \to T_1 \text{ (C)}, \quad
 T_3 \to T_1 \text{ (C)}, \quad 
-T_1 \to T_3 \text{ (A)}.
+T_1 \to T_3 \text{ (A)}, \quad
+T_3 \to T_2 \text{ (C)}
 \]
 There are cycles (e.g.\ $T_1 \to T_2 \to T_3 \to T_1$ and $T_1 \to T_2 \to T_1$).
 
@@ -129,8 +130,8 @@ We start with an \emph{initial} version of $A$ (txn-id $=0$, begin-ts $=0$, end-
     \[
       \text{txn-id} = 2, \quad
       \text{begin-ts} = 3, \quad
-      \text{end-ts} = \infty, \quad
-      \text{read-ts} = 0, \quad
+      \text{end-ts} = 6, \quad
+      \text{read-ts} = 3, \quad
       \text{value} = 20
     \]
 
@@ -229,7 +230,7 @@ which forms a cycle (a ``mutual wait’’).  Consequently, a deadlock arises.
 %------------------------------------
 \subsubsection*{(b) \; Deadlock Prevention}
 
-\paragraph{(i) Table}
+\subsection*{(i) Table:}
 
 \begin{table}[!htbp]
 \centering
@@ -247,7 +248,6 @@ which forms a cycle (a ``mutual wait’’).  Consequently, a deadlock arises.
 ``S(\(\cdot\))'' = shared lock, ``X(\(\cdot\))'' = exclusive lock.}
 \end{table}
 
-\newpage
 \subsubsection*{(ii)~Wait-for Graph}
 \begin{itemize}
   \item T1 $\rightarrow$ T4 \textbf{because of} A
@@ -263,6 +263,7 @@ T1 \;\rightarrow\; T4 \;\rightarrow\; T2 \;\rightarrow\; T3 \;\rightarrow\; T1,
 \]
 so a deadlock arises.
 
+\newpage
 \subsubsection*{(iv)~Wait--Die Policy}
 \begin{table}[!htbp]
 \centering
@@ -292,7 +293,6 @@ so a deadlock arises.
 \caption{Lock requests under Wait--Die, matching the orientation from part (i).}
 \end{table}
 
-\newpage
 \subsubsection*{(v)~Wound--Wait Policy}
 \begin{table}[!htbp]
 \centering
