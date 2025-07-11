@@ -3,8 +3,8 @@
 #include <chrono>
 
 #include "float.h"
-#include "operators/seq_scan.h"
-#include "optimizer/table_stats.h"
+#include <cmath>
+#include <algorithm>
 using namespace std;
 using namespace std::chrono;
 namespace buzzdb {
@@ -40,11 +40,8 @@ JoinOptimizer::JoinOptimizer(std::vector<LogicalJoinNode> joins) { _joins = join
  *         cost2
  */
 double JoinOptimizer::estimate_join_cost(
-    UNUSED_ATTRIBUTE LogicalJoinNode j, 
-    UNUSED_ATTRIBUTE uint64_t card1,
-    UNUSED_ATTRIBUTE uint64_t card2, 
-    UNUSED_ATTRIBUTE double cost1, 
-    UNUSED_ATTRIBUTE double cost2,
+    UNUSED_ATTRIBUTE LogicalJoinNode j, UNUSED_ATTRIBUTE uint64_t card1,
+    UNUSED_ATTRIBUTE uint64_t card2, UNUSED_ATTRIBUTE double cost1, UNUSED_ATTRIBUTE double cost2,
     UNUSED_ATTRIBUTE std::map<std::string, TableStats>& stats) {
     // Insert your code here.
     /*
@@ -53,10 +50,11 @@ double JoinOptimizer::estimate_join_cost(
      *                          + ntups(t1) x ntups(t2)  //CPU cost
      */
     // HINT: You can use j and stats if you want to try other join algorithm
-    
-    double io_cost = cost1 + (card1 * cost2);
-    double cpu_cost = card1 * card2;
-    return io_cost + cpu_cost;
+
+    double scan1 = stats[j.left_table].estimate_scan_cost();
+    double scan2 = stats[j.right_table].estimate_scan_cost();
+
+    return scan1 + card1 * scan2 + card1 * card2;
 }
 
 /**
@@ -79,33 +77,15 @@ double JoinOptimizer::estimate_join_cost(
  * @return The cardinality of the join
  */
 int JoinOptimizer::estimate_join_cardinality(
-    UNUSED_ATTRIBUTE LogicalJoinNode j, 
-    UNUSED_ATTRIBUTE uint64_t card1,
-    UNUSED_ATTRIBUTE uint64_t card2, 
-    UNUSED_ATTRIBUTE bool t1pkey, 
-    UNUSED_ATTRIBUTE bool t2pkey,
+    UNUSED_ATTRIBUTE LogicalJoinNode j, UNUSED_ATTRIBUTE uint64_t card1,
+    UNUSED_ATTRIBUTE uint64_t card2, UNUSED_ATTRIBUTE bool t1pkey, UNUSED_ATTRIBUTE bool t2pkey,
     UNUSED_ATTRIBUTE std::map<std::string, TableStats>& stats) {
-    
-    if (j.op == PredicateType::EQ) {
-        if (t1pkey && !t2pkey) {
-            return card2;
-        } else if (!t1pkey && t2pkey) {
-            return card1;
-        } else if (t1pkey && t2pkey) {
-            return std::min(card1, card2);
-        } else {
-            int distinct_value1 = stats[j.left_table].get_distinct_values(j.left_field);
-            int distinct_value2 = stats[j.right_table].get_distinct_values(j.right_field);
-            
-            int max_distinct = std::max(distinct_value1, distinct_value2);
-            if (max_distinct == 0) {
-                max_distinct = 1;
-            }
-            
-            return static_cast<int>((card1  * card2) / max_distinct);
-        }
+    if (t1pkey && t2pkey) {
+        return std::min(card1, card2);
+    } else if (t1pkey || t2pkey) {
+        return std::max(card1, card2);
     } else {
-        return static_cast<int>((card1 * card2) / 3.0);
+        return std::max(card1, card2);
     }
 }
 
@@ -125,46 +105,42 @@ int JoinOptimizer::estimate_join_cardinality(
 std::vector<LogicalJoinNode> JoinOptimizer::order_joins(
     UNUSED_ATTRIBUTE std::map<std::string, TableStats> stats,
     UNUSED_ATTRIBUTE std::map<std::string, double> filter_selectivities) {
-    PlanCache pc;
-    
-    if (_joins.empty()) {
-        return std::vector<LogicalJoinNode>();
-    }
-    
-    if (_joins.size() == 1) {
+    if (_joins.size() == 0) {
         return _joins;
     }
-    
-    for (size_t i = 1; i <= _joins.size(); ++i) {
-        auto subsets = enumerate_subsets(_joins, i);
-        
-        for (const auto& subset: subsets) {
-            double best_cost_so_far = DBL_MAX;
-            bool found_valid_plan = false;
-            
-            std::vector<LogicalJoinNode> subsetVec(subset.begin(), subset.end());
-            
-            for (const auto& join_to_remove : subset) {
+    std::set<std::set<LogicalJoinNode>> subsets;
+    std::vector<LogicalJoinNode> best_order;
+    PlanCache pc;
+    for (std::size_t i = 1; i <= _joins.size(); ++i) {
+        subsets = enumerate_subsets(_joins, i);
+        for (auto join_set : subsets) {
+            double best_cost = DBL_MAX;
+            for (auto jt = join_set.begin(); jt != join_set.end(); ++jt) {
                 CostCard cc;
-                bool success = compute_cost_and_card_of_subplan(stats, filter_selectivities, join_to_remove, subset, best_cost_so_far, pc, cc);
-                
-                if (success) {
-                    best_cost_so_far = cc.cost;
-                    auto new_subset = subset;
-                    
-                    pc.add_plan(new_subset, cc.cost, cc.card, cc.plan);
-                    found_valid_plan = true;
+                LogicalJoinNode j = *jt;
+                if (compute_cost_and_card_of_subplan(stats, filter_selectivities, j, join_set, best_cost, pc, cc)) {
+                    best_cost = cc.cost;
+                    auto new_join = join_set;
+                    pc.add_plan(new_join, cc.cost, cc.card, cc.plan);
                 }
-            }
-            
-            if (!found_valid_plan && i > 1) {
-                // TODO
             }
         }
     }
-    
-    std::set<LogicalJoinNode> all_joins(std::begin(_joins), std::end(_joins));
-    return pc.get_order(all_joins);
+
+    std::set<LogicalJoinNode> new_joins;
+    for (auto & _join : _joins) {
+        new_joins.insert(_join);
+    }
+
+    auto best_plan = pc.get_order(new_joins);
+    for (size_t i = 0; i < new_joins.size(); ++i) {
+        if (stats[best_plan[i].left_table].estimate_table_cardinality(1) < stats[best_plan[i].right_table].estimate_table_cardinality(1)) {
+            std::swap(best_plan[i], best_plan[best_plan.size() - 1]);
+            break;
+        }
+    }
+
+    return best_plan;
 }
 
 // helper methods

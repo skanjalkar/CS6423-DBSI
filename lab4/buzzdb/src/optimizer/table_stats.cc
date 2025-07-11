@@ -1,9 +1,10 @@
 
 #include "optimizer/table_stats.h"
-#include <cstddef>
-#include <cstdint>
-#include "operators/seq_scan.h"
-#include <set>
+
+#include <climits>
+#include <unordered_set>
+#include <algorithm>
+#include <cmath>
 
 namespace buzzdb {
 namespace table_stats {
@@ -25,15 +26,13 @@ namespace table_stats {
  * @param min_val The minimum integer value that will ever be passed to this class for histogramming
  * @param max_val The maximum integer value that will ever be passed to this class for histogramming
  */
-IntHistogram::IntHistogram(UNUSED_ATTRIBUTE int64_t buckets, 
-    UNUSED_ATTRIBUTE int64_t min_val,
-    UNUSED_ATTRIBUTE int64_t max_val) {
-    this->buckets_ = buckets;
-    this->min_val_ = min_val;
-    this->max_val_ = max_val;
-    this->bucket_width_ = std::max(1.0, (max_val - min_val + 1.0) / buckets);
-    this->heights_.resize(buckets, 0);
-    this->total_tuples_ = 0;
+IntHistogram::IntHistogram(UNUSED_ATTRIBUTE int64_t buckets, UNUSED_ATTRIBUTE int64_t min_val,
+                           UNUSED_ATTRIBUTE int64_t max_val) {
+    histogram.reserve(buckets);
+    this->buckets = buckets;
+    this->min_val = min_val;
+    this->max_val = max_val;
+    this->keys_per_bin = (max_val - min_val) / buckets + 1;
 }
 
 /**
@@ -41,13 +40,11 @@ IntHistogram::IntHistogram(UNUSED_ATTRIBUTE int64_t buckets,
  * @param val Value to add to the histogram
  */
 void IntHistogram::add_value(UNUSED_ATTRIBUTE int64_t val) {
-    if (val >= min_val_ && val <= max_val_) {
-        int bucket_index = static_cast<int>((val - min_val_) / bucket_width_);
-        if (bucket_index >= buckets_) {
-            bucket_index = buckets_ - 1;
-        }
-        heights_[bucket_index]++;
-        total_tuples_++;
+    int64_t bin = (val - min_val) / keys_per_bin;
+    if (histogram.find(bin) == histogram.end()) {
+        histogram[bin] = 1;
+    } else {
+        histogram[bin]++;
     }
 }
 
@@ -62,108 +59,41 @@ void IntHistogram::add_value(UNUSED_ATTRIBUTE int64_t val) {
  * @return Predicted selectivity of this particular operator and value
  */
 double IntHistogram::estimate_selectivity(UNUSED_ATTRIBUTE PredicateType op,
-    UNUSED_ATTRIBUTE int64_t v) {
-        
-    if (total_tuples_ == 0) {
-        return 1.0;
+                                          UNUSED_ATTRIBUTE int64_t v) {
+    int64_t total_values = 0;
+    for (const auto &pair : histogram) {
+        total_values += pair.second;
     }
-    
-    if (v < min_val_) {
-        switch (op) {
-            case PredicateType::LT:
-            case PredicateType::LE:
-                return 0.0;  // No values are less than min_val_
-            case PredicateType::GT:
-            case PredicateType::GE:
-                return 1.0;  // All values are greater than anything below min_val_
-            case PredicateType::EQ:
-                return 0.0;  // No values equal to anything below min_val_
-            case PredicateType::NE:
-                return 1.0;  // All values not equal to anything below min_val_
-            default:
-                return 1.0;
-        }
-    }
-
-    if (v > max_val_) {
-        switch (op) {
-            case PredicateType::LT:
-            case PredicateType::LE:
-                return 1.0;  // All values are less than anything above max_val_
-            case PredicateType::GT:
-            case PredicateType::GE:
-                return 0.0;  // No values are greater than max_val_
-            case PredicateType::EQ:
-                return 0.0;  // No values equal to anything above max_val_
-            case PredicateType::NE:
-                return 1.0;  // All values not equal to anything above max_val_
-            default:
-                return 1.0;
-        }
-    }
-    
-    int bucket_index = static_cast<int>((v - min_val_) / bucket_width_);
-    if (bucket_index >= buckets_) {
-        bucket_index = buckets_ - 1;
-    }
-    
-    double bucket_selectivity = static_cast<double>(heights_[bucket_index]) / total_tuples_;
-    double bucket_left = min_val_ + bucket_index * bucket_width_;
-    double fraction_in_bucket = (v - bucket_left) / bucket_width_; // Position within bucket
-
     switch (op) {
         case PredicateType::EQ: {
-            if (heights_[bucket_index] == 0) return 0.0;
-            return bucket_selectivity / bucket_width_;
+            int64_t bin = (v - min_val) / keys_per_bin;
+            return static_cast<double>(histogram[bin]) / total_values;
         }
         case PredicateType::NE: {
-            if (heights_[bucket_index] == 0) return 1.0;
-            return 1.0 - (bucket_selectivity / bucket_width_);
+            return 1.0 - estimate_selectivity(PredicateType::EQ, v);
         }
-        case PredicateType::GT:
-        case PredicateType::GE: {
-            double selectivity = 0.0;
-            
-            if (heights_[bucket_index] > 0) {
-                if (op == PredicateType::GT) {
-                    selectivity += bucket_selectivity * (1.0 - fraction_in_bucket);
-                } else { // GE
-                    selectivity += bucket_selectivity * (1.0 - fraction_in_bucket + 1.0/bucket_width_);
-                }
+        case PredicateType::LT: {
+            int64_t bin_lt = (v - min_val) / keys_per_bin;
+            int64_t min_key_in_bin = min_val + bin_lt * keys_per_bin;
+            int64_t included_keys_in_bin = v - min_key_in_bin;
+            int64_t included_values = histogram[bin_lt] * included_keys_in_bin / keys_per_bin;
+            for (int64_t i = 0; i < bin_lt; i++) {
+                included_values += histogram[i];
             }
-            
-            // Add contribution from all buckets to the right
-            for (int i = bucket_index + 1; i < buckets_; i++) {
-                selectivity += static_cast<double>(heights_[i]) / total_tuples_;
-            }
-            
-            return selectivity;
+            return static_cast<double>(included_values) / total_values;
         }
-        case PredicateType::LT:
         case PredicateType::LE: {
-            // Add selectivity from buckets to left of v
-            double selectivity = 0.0;
-            
-            // Add partial contribution from current bucket
-            if (heights_[bucket_index] > 0) {
-                if (op == PredicateType::LT) {
-                    selectivity += bucket_selectivity * fraction_in_bucket;
-                } else { // LE
-                    selectivity += bucket_selectivity * (fraction_in_bucket + 1.0/bucket_width_);
-                }
-            }
-            
-            // Add contribution from all buckets to the left
-            for (int i = 0; i < bucket_index; i++) {
-                selectivity += static_cast<double>(heights_[i]) / total_tuples_;
-            }
-            
-            return selectivity;
+            return estimate_selectivity(PredicateType::LT, v) +
+                   estimate_selectivity(PredicateType::EQ, v);
         }
-        default:
-            return 1.0; // Unknown operator
+        case PredicateType::GT: {
+            return 1.0 - estimate_selectivity(PredicateType::LE, v);
+        }
+        case PredicateType::GE: {
+            return 1.0 - estimate_selectivity(PredicateType::LT, v);
+        }
     }
-    
+    return -1;
 }
 
 /**
@@ -180,59 +110,45 @@ double IntHistogram::estimate_selectivity(UNUSED_ATTRIBUTE PredicateType op,
  * @param num_fields
  *            The number of columns in the table
  */
-TableStats::TableStats(UNUSED_ATTRIBUTE int64_t table_id, 
-    UNUSED_ATTRIBUTE int64_t io_cost_per_page,
-    UNUSED_ATTRIBUTE uint64_t num_pages,
-    UNUSED_ATTRIBUTE uint64_t num_fields) {
+TableStats::TableStats(UNUSED_ATTRIBUTE int64_t table_id, UNUSED_ATTRIBUTE int64_t io_cost_per_page,
+                       UNUSED_ATTRIBUTE uint64_t num_pages, UNUSED_ATTRIBUTE uint64_t num_fields) {
+    this->num_pages = num_pages;
+    this->num_fields = num_fields;
+    this->io_cost_per_page = io_cost_per_page;
+    operators::SeqScan seq_scan(table_id, num_pages, num_fields);
+    seq_scan.open();
+    std::vector min_vals(num_fields, INT_MAX);
+    std::vector max_vals(num_fields, INT_MIN);
+
+    while (seq_scan.has_next()) {
+        for (uint64_t i = 0; i < num_fields; i++) {
+            std::vector<int> tuple = seq_scan.get_tuple();
+            min_vals[i] = std::min(min_vals[i], tuple[i]);
+            max_vals[i] = std::max(max_vals[i], tuple[i]);
+        }
+    }
+
+    seq_scan.reset();
+
+    this->histograms.reserve(num_fields);
+    for (uint64_t i = 0; i < num_fields; i++) {
+        histograms.emplace_back(NUM_HIST_BINS, min_vals[i], max_vals[i]);
+    }
+    this->num_tuples = 0;
+    while (seq_scan.has_next()) {
+        std::vector<int> tuple = seq_scan.get_tuple();
+        for (uint64_t i = 0; i < num_fields; i++) {
+            histograms[i].add_value(tuple[i]);
+        }
+        num_tuples++;
+    }
+    seq_scan.close();
     /*
         // some code goes here
         Hint: use seqscan operator (operators/seq_scan.h) to scan over the table
         and build stats. You should try to do this reasonably efficiently, but you don't
         necessarily have to (for example) do everything in a single scan of the table.
     */
-    
-    this->table_id_ = table_id;
-    this->io_cost_per_page_ = io_cost_per_page;
-    this->num_pages_ = num_pages;
-    this->num_fields_ = num_fields;
-    this->tuple_count_= 0;
-    distinct_values_.resize(num_fields, 0);
-    
-    std::vector<int64_t> mins(num_fields, INT64_MAX);
-    std::vector<int64_t> maxs(num_fields, INT64_MIN);
-    std::vector<std::set<int64_t>> unique_values(num_fields);
-    operators::SeqScan scanner(table_id, num_pages, num_fields);
-    scanner.open();
-    while (scanner.has_next()) {
-        auto tuple = scanner.get_tuple();
-        ++tuple_count_;
-        for (size_t i = 0; i < num_fields; ++i) {
-            int64_t value = tuple[i];
-            mins[i] = std::min(mins[i], value);
-            maxs[i] = std::max(maxs[i], value);
-            unique_values[i].insert(value);
-        }
-    }
-    
-    histograms_.resize(num_fields);
-    for (size_t i = 0; i < num_fields; ++i) {
-        distinct_values_[i] = unique_values[i].size();
-        if (mins[i] <= maxs[i]) {
-            histograms_[i] = IntHistogram(NUM_HIST_BINS, mins[i], maxs[i]);
-        } else {
-            histograms_[i] = IntHistogram(1, 0, 1);
-        }
-    }
-    
-    scanner.reset();
-    while (scanner.has_next()) {
-        auto tuple = scanner.get_tuple();
-        for (size_t i = 0; i < num_fields; ++i) {
-            histograms_[i].add_value(tuple[i]);
-        }
-    }
-    
-    scanner.close();
 }
 
 /**
@@ -248,9 +164,7 @@ TableStats::TableStats(UNUSED_ATTRIBUTE int64_t table_id,
  * @return The estimated cost of scanning the table.
  */
 
-double TableStats::estimate_scan_cost() {
-    return io_cost_per_page_ * num_pages_;
-}
+double TableStats::estimate_scan_cost() { return num_pages * io_cost_per_page; }
 
 /**
  * This method returns the number of tuples in the relation, given that a
@@ -262,7 +176,7 @@ double TableStats::estimate_scan_cost() {
  *         selectivity_factor
  */
 uint64_t TableStats::estimate_table_cardinality(UNUSED_ATTRIBUTE double selectivity_factor) {
-    return static_cast<uint64_t>(tuple_count_ * selectivity_factor);
+    return num_tuples * selectivity_factor;
 }
 
 /**
@@ -279,12 +193,9 @@ uint64_t TableStats::estimate_table_cardinality(UNUSED_ATTRIBUTE double selectiv
  *         predicate
  */
 double TableStats::estimate_selectivity(UNUSED_ATTRIBUTE int64_t field,
-    UNUSED_ATTRIBUTE PredicateType op,
-    UNUSED_ATTRIBUTE int64_t constant) {
-    if (field < 0 || field >= static_cast<int64_t>(histograms_.size())) {
-        return 1.0;
-    }
-    return histograms_[field].estimate_selectivity(op, constant);
+                                        UNUSED_ATTRIBUTE PredicateType op,
+                                        UNUSED_ATTRIBUTE int64_t constant) {
+    return histograms[field].estimate_selectivity(op, constant);
 }
 
 }  // namespace table_stats
