@@ -106,3 +106,5 @@ ProblemSet/*.pdf
 */target/
 *.zip
 /lab1/*.cache/
+__MACOSX/
+
